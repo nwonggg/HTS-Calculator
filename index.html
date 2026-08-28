@@ -468,11 +468,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 
 const CODE_DEFS = [
   { scheduleB: '2934.99.0005', bare: '293499', name: 'Synthetic DNA', re: /2934\s?[.\-]?\s?99/i },
+  { scheduleB: '3507.90', bare: '350790', name: 'Lab Reagents', re: /3507\s?[.\-]?\s?90/i },
   { scheduleB: '3822.19.0000', bare: '382219', name: 'Lab Reagents', re: /3822\s?[.\-]?\s?19/i },
   { scheduleB: '3824.99.9370', bare: '382499', name: 'Lab Reagents', re: /3824\s?[.\-]?\s?99/i }
 ];
 const NEEDS_APPROVAL = 'NEEDS_APPROVAL';
-const BLANK_HS_RE = /HS\s*#?\s*:\s*(?:ECCN|$)/i;
+const HS_LABEL_RE = /HS\s*#?\s*:\s*([0-9][0-9.\-\s]{0,12})?(?=\s*(?:ECCN|$))/i;
 
 let selectedFiles = [];
 let fileIdCounter = 1;
@@ -611,7 +612,7 @@ function buildTotalsBlock(items, contextLabel){
   if(naRows.length > 0 || hasFlagHistory(contextLabel)){
     const naHeaderHtml = `
       <div class="code">Attention needed</div>
-      <div class="commodity-name">HS # left blank &mdash; drag to the correct code, or drag back here if misplaced</div>
+      <div class="commodity-name">HS # blank or not recognized &mdash; drag to the correct code, or drag back here if misplaced</div>
     `;
     const naFooterHtml = `<a class="notify-link" href="${buildMailtoLink(naRows, contextLabel)}">&#9993; Notify Candace</a>`;
     const { card: naCard, sum: naSum } = buildCard(naRows, NEEDS_APPROVAL, naHeaderHtml, 'review', {
@@ -901,8 +902,8 @@ async function parsePdf(file){
         pendingDescription = null;
       } else if(currentBlock && !pendingDescription){
         const trimmed = line.trim();
-        const looksLikeCodeOrBlank = CODE_DEFS.some(d => d.re.test(line)) || BLANK_HS_RE.test(line);
-        if(trimmed.length > 3 && !looksLikeCodeOrBlank){
+        const looksLikeCodeOrHsLine = CODE_DEFS.some(d => d.re.test(line)) || HS_LABEL_RE.test(line);
+        if(trimmed.length > 3 && !looksLikeCodeOrHsLine){
           pendingDescription = trimmed;
         }
       }
@@ -933,25 +934,31 @@ async function parsePdf(file){
         }
       }
 
-      if(!matched && BLANK_HS_RE.test(line)){
-        let value;
-        let basis;
-        if(currentBlock){
-          value = Math.round(currentBlock.qty * currentBlock.unitPrice * 100) / 100;
-          basis = `qty ${currentBlock.qty} \u00d7 ${fmt(currentBlock.unitPrice)}`;
-        } else {
-          const v = findValueOnLine(line);
-          value = v === null ? 0 : v;
-          basis = null;
+      if(!matched){
+        const hsMatch = line.match(HS_LABEL_RE);
+        if(hsMatch){
+          const rawCode = (hsMatch[1] || '').trim();
+          let value;
+          let basis;
+          if(currentBlock){
+            value = Math.round(currentBlock.qty * currentBlock.unitPrice * 100) / 100;
+            basis = `qty ${currentBlock.qty} \u00d7 ${fmt(currentBlock.unitPrice)}`;
+          } else {
+            const v = findValueOnLine(line);
+            value = v === null ? 0 : v;
+            basis = null;
+          }
+          found.push({
+            scheduleB: NEEDS_APPROVAL,
+            text: rawCode
+              ? `HS # ${rawCode} not recognized — needs a category`
+              : (stripEccn(line.length > 90 ? line.slice(0, 90) + '…' : line) || 'HS # left blank on invoice'),
+            basis,
+            value,
+            partNumber: currentBlock ? currentBlock.partNumber : '',
+            description: pendingDescription || ''
+          });
         }
-        found.push({
-          scheduleB: NEEDS_APPROVAL,
-          text: stripEccn(line.length > 90 ? line.slice(0, 90) + '…' : line) || 'HS # left blank on invoice',
-          basis,
-          value,
-          partNumber: currentBlock ? currentBlock.partNumber : '',
-          description: pendingDescription || ''
-        });
       }
     });
   }
