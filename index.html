@@ -229,6 +229,15 @@
     margin-top:6px;
     color:var(--accent-text);
   }
+  .total-card .qty-total{
+    font-size:12.5px;
+    color:var(--text-secondary);
+    margin-top:6px;
+  }
+  .total-card .qty-total strong{ font-family:'Roboto Mono',monospace; color:var(--text-primary); }
+  .breakdown-qty{ color:var(--text-muted); white-space:nowrap; }
+  .grand-right{ display:flex; align-items:center; gap:18px; }
+  .grand-qty{ font-family:'Roboto Mono',monospace; font-size:13.5px; font-weight:500; color:var(--text-secondary); }
   .total-card .count{
     font-size:11px;
     color:var(--text-muted);
@@ -527,9 +536,17 @@ function buildMailtoLink(naRows, contextLabel){
   return `mailto:csilk@twistbioscience.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
+function sumQty(rows){
+  return rows.reduce((a, r) => a + (r.qty || 0), 0);
+}
+function fmtQty(n){
+  return n.toLocaleString('en-US', { maximumFractionDigits: 3 });
+}
+
 function buildCard(rows, targetScheduleB, headerHtml, extraClass, options){
   options = options || {};
   const sum = rows.reduce((a, r) => a + r.value, 0);
+  const qtyTotal = sumQty(rows);
   const hasZeroIssue = rows.some(r => r.value === 0);
 
   const card = document.createElement('div');
@@ -543,7 +560,7 @@ function buildCard(rows, targetScheduleB, headerHtml, extraClass, options){
             <span class="drag-grip" title="Drag to reclassify">&#8942;&#8942;</span>
             <span class="breakdown-amt${r.value === 0 ? ' zero' : ''}">${fmt(r.value)}</span>
           </div>
-          <div class="breakdown-label">${r.partNumber ? r.partNumber + ' — ' : ''}${r.text}</div>
+          <div class="breakdown-label">${r.partNumber ? r.partNumber + ' — ' : ''}${r.text}${r.qty ? ` <span class="breakdown-qty">(qty ${fmtQty(r.qty)})</span>` : ''}</div>
         </div>
       `).join('')}</div>`;
   } else if(options.emptyMessage){
@@ -555,6 +572,7 @@ function buildCard(rows, targetScheduleB, headerHtml, extraClass, options){
   card.innerHTML = `
     ${headerHtml}
     <div class="amount">${fmt(sum)}${hasZeroIssue ? ' <span class="warn-icon" title="One or more matched lines came out to $0.00">&#9888;</span>' : ''}</div>
+    <div class="qty-total">Total qty: <strong>${fmtQty(qtyTotal)}</strong></div>
     <div class="count">${rows.length} matched line${rows.length === 1 ? '' : 's'}</div>
     ${breakdownHtml}
     ${options.footerHtml || ''}
@@ -588,7 +606,7 @@ function buildCard(rows, targetScheduleB, headerHtml, extraClass, options){
     renderMatched();
   });
 
-  return { card, sum };
+  return { card, sum, qtyTotal };
 }
 
 function buildTotalsBlock(items, contextLabel){
@@ -596,6 +614,7 @@ function buildTotalsBlock(items, contextLabel){
   const grid = document.createElement('div');
   grid.className = 'totals-grid';
   let grandTotal = 0;
+  let grandQty = 0;
 
   CODE_DEFS.forEach(def => {
     const rows = items.filter(i => i.scheduleB === def.scheduleB);
@@ -603,8 +622,9 @@ function buildTotalsBlock(items, contextLabel){
       <div class="code">${def.bare} <span style="color:var(--text-muted); font-weight:400;">(${def.scheduleB})</span></div>
       <div class="commodity-name">${def.name}</div>
     `;
-    const { card, sum } = buildCard(rows, def.scheduleB, headerHtml, '');
+    const { card, sum, qtyTotal } = buildCard(rows, def.scheduleB, headerHtml, '');
     grandTotal += sum;
+    grandQty += qtyTotal;
     grid.appendChild(card);
   });
 
@@ -615,11 +635,12 @@ function buildTotalsBlock(items, contextLabel){
       <div class="commodity-name">HS # blank or not recognized &mdash; drag to the correct code, or drag back here if misplaced</div>
     `;
     const naFooterHtml = `<a class="notify-link" href="${buildMailtoLink(naRows, contextLabel)}">&#9993; Notify Candace</a>`;
-    const { card: naCard, sum: naSum } = buildCard(naRows, NEEDS_APPROVAL, naHeaderHtml, 'review', {
+    const { card: naCard, sum: naSum, qtyTotal: naQty } = buildCard(naRows, NEEDS_APPROVAL, naHeaderHtml, 'review', {
       emptyMessage: 'All flagged lines have been reclassified.',
       footerHtml: naFooterHtml
     });
     grandTotal += naSum;
+    grandQty += naQty;
     grid.appendChild(naCard);
   }
 
@@ -631,7 +652,7 @@ function buildTotalsBlock(items, contextLabel){
 
   const totalRow = document.createElement('div');
   totalRow.className = 'grand-total-row';
-  totalRow.innerHTML = `<span>Total &mdash; all HS codes</span><span class="amount">${fmt(grandTotal)}</span>`;
+  totalRow.innerHTML = `<span>Total &mdash; all HS codes</span><span class="grand-right"><span class="grand-qty">Qty ${fmtQty(grandQty)}</span><span class="amount">${fmt(grandTotal)}</span></span>`;
   wrap.appendChild(totalRow);
 
   return wrap;
@@ -674,13 +695,14 @@ function renderMatched(){
     <th>HS code</th>
     ${showSource ? '<th>Source</th>' : ''}
     <th>Line text</th>
+    <th class="num">Qty</th>
     <th class="num">Value</th>
     <th></th>
   `;
 
   body.innerHTML = '';
   if(matchedItems.length === 0){
-    body.innerHTML = `<tr><td colspan="${showSource ? 5 : 4}" style="text-align:center;color:var(--text-muted);padding:16px;">No matched lines yet.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${showSource ? 6 : 5}" style="text-align:center;color:var(--text-muted);padding:16px;">No matched lines yet.</td></tr>`;
     return;
   }
 
@@ -700,6 +722,7 @@ function renderMatched(){
         ${item.basis ? `<div class="basis-line">${item.basis}</div>` : ''}
         ${isZero ? `<div class="basis-line warn-text">&#9888; No price found on this line &mdash; defaulted to $0.00, please check manually</div>` : ''}
       </td>
+      <td class="num">${item.qty ? fmtQty(item.qty) : '&mdash;'}</td>
       <td class="num${isZero ? ' zero-amount' : ''}">${fmt(item.value)}</td>
       <td><button class="del-btn" data-idx="${idx}" aria-label="Remove match">&times;</button></td>
     `;
@@ -927,7 +950,8 @@ async function parsePdf(file){
             basis,
             value,
             partNumber: currentBlock ? currentBlock.partNumber : '',
-            description: pendingDescription || ''
+            description: pendingDescription || '',
+            qty: currentBlock && !Number.isNaN(currentBlock.qty) ? currentBlock.qty : 0
           });
           matched = true;
           break;
@@ -956,7 +980,8 @@ async function parsePdf(file){
             basis,
             value,
             partNumber: currentBlock ? currentBlock.partNumber : '',
-            description: pendingDescription || ''
+            description: pendingDescription || '',
+            qty: currentBlock && !Number.isNaN(currentBlock.qty) ? currentBlock.qty : 0
           });
         }
       }
@@ -1013,18 +1038,24 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
 function sectionSummaryRows(items){
   let rows = '';
   let grand = 0;
+  let grandQty = 0;
   CODE_DEFS.forEach(def => {
-    const sum = items.filter(i => i.scheduleB === def.scheduleB).reduce((a, r) => a + r.value, 0);
+    const codeRows = items.filter(i => i.scheduleB === def.scheduleB);
+    const sum = codeRows.reduce((a, r) => a + r.value, 0);
+    const qty = sumQty(codeRows);
     grand += sum;
-    rows += `<tr><td>${def.name}</td><td>${def.bare} (${def.scheduleB})</td><td class="num">${fmt(sum)}</td></tr>`;
+    grandQty += qty;
+    rows += `<tr><td>${def.name}</td><td>${def.bare} (${def.scheduleB})</td><td class="num">${fmtQty(qty)}</td><td class="num">${fmt(sum)}</td></tr>`;
   });
   const naRows = items.filter(i => i.scheduleB === NEEDS_APPROVAL);
   if(naRows.length > 0){
     const naSum = naRows.reduce((a, r) => a + r.value, 0);
+    const naQty = sumQty(naRows);
     grand += naSum;
-    rows += `<tr><td>Attention needed</td><td>&mdash;</td><td class="num">${fmt(naSum)}</td></tr>`;
+    grandQty += naQty;
+    rows += `<tr><td>Attention needed</td><td>&mdash;</td><td class="num">${fmtQty(naQty)}</td><td class="num">${fmt(naSum)}</td></tr>`;
   }
-  rows += `<tr class="grand"><td colspan="2">Total &mdash; all HS codes</td><td class="num">${fmt(grand)}</td></tr>`;
+  rows += `<tr class="grand"><td colspan="2">Total &mdash; all HS codes</td><td class="num">${fmtQty(grandQty)}</td><td class="num">${fmt(grand)}</td></tr>`;
   return rows;
 }
 
@@ -1035,12 +1066,12 @@ function buildPrintableSummaryHtml(){
 
   let bodyHtml = '';
   if(labels.length <= 1){
-    bodyHtml += `<table><thead><tr><th>Commodity</th><th>HS code</th><th class="num">Total</th></tr></thead><tbody>${sectionSummaryRows(matchedItems)}</tbody></table>`;
+    bodyHtml += `<table><thead><tr><th>Commodity</th><th>HS code</th><th class="num">Qty</th><th class="num">Total</th></tr></thead><tbody>${sectionSummaryRows(matchedItems)}</tbody></table>`;
   } else {
     labels.forEach(label => {
-      bodyHtml += `<h3>${label}</h3><table><thead><tr><th>Commodity</th><th>HS code</th><th class="num">Total</th></tr></thead><tbody>${sectionSummaryRows(matchedItems.filter(i => i.source === label))}</tbody></table>`;
+      bodyHtml += `<h3>${label}</h3><table><thead><tr><th>Commodity</th><th>HS code</th><th class="num">Qty</th><th class="num">Total</th></tr></thead><tbody>${sectionSummaryRows(matchedItems.filter(i => i.source === label))}</tbody></table>`;
     });
-    bodyHtml += `<h3>Combined total (${labels.length} invoices)</h3><table><thead><tr><th>Commodity</th><th>HS code</th><th class="num">Total</th></tr></thead><tbody>${sectionSummaryRows(matchedItems)}</tbody></table>`;
+    bodyHtml += `<h3>Combined total (${labels.length} invoices)</h3><table><thead><tr><th>Commodity</th><th>HS code</th><th class="num">Qty</th><th class="num">Total</th></tr></thead><tbody>${sectionSummaryRows(matchedItems)}</tbody></table>`;
   }
 
   return `<!DOCTYPE html>
